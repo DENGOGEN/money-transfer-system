@@ -21,3 +21,5 @@
    ```bash
    git clone https://github.com/DENGOGEN/money-transfer-system.git
 <img width="782" height="580" alt="image" src="https://github.com/user-attachments/assets/0a076fbf-891f-41f1-9db6-51b3d8abba05" />
+<img width="910" height="692" alt="image" src="https://github.com/user-attachments/assets/3e887b9f-3608-41d2-9759-7776eaa925f3" />
+
