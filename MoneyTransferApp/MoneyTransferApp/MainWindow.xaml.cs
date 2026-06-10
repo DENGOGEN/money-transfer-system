@@ -1,0 +1,342 @@
+﻿using MoneyTransferApp.Models;
+using MoneyTransferApp.Services;
+using MoneyTransferApp.Views;
+using System;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Threading;
+
+namespace MoneyTransferApp
+{
+    public partial class MainWindow : Window
+    {
+        private readonly TransferService _transferService;
+        private readonly WalletService _walletService;
+        private readonly AuthService _authService;
+        private Transaction _pendingTransaction;
+        private DispatcherTimer _balanceTimer;
+
+        // Поля для отображения карты
+        private string _fullCardNumber = "";
+        private string _fullCvv = "";
+        private bool _isCardNumberVisible = false;
+        private bool _isCvvVisible = false;
+
+        public MainWindow()
+        {
+            InitializeComponent();
+            _transferService = TransferService.Instance;
+            _walletService = WalletService.Instance;
+            _authService = AuthService.Instance;
+
+            LoadUserData();
+            LoadHistory();
+            StartBalanceRefreshTimer();
+        }
+
+        private void LoadUserData()
+        {
+            var user = _authService.CurrentUser;
+            if (user != null)
+            {
+                // Верхняя панель
+                UserPhoneText.Text = user.Phone;
+
+                // Вкладка Профиль
+                ProfilePhone.Text = user.Phone;
+                ProfileVerified.Text = user.IsVerified ? "✅ Подтверждён" : "⚠️ Не подтверждён";
+
+                // Загрузка данных карты
+                LoadCardData();
+
+                RefreshBalance();
+            }
+        }
+
+        private void LoadCardData()
+        {
+            var user = _authService.CurrentUser;
+            if (user != null)
+            {
+                var card = CardService.Instance.GetCardByUserId(user.Id);
+                if (card != null)
+                {
+                    // Сохраняем полные данные
+                    _fullCardNumber = card.CardNumber;
+                    _fullCvv = card.Cvv;
+
+                    // Показываем маскированные данные
+                    ProfileCardNumber.Text = card.MaskedNumber;
+                    ProfileCardExpiry.Text = card.ExpiryDate;
+                    ProfileCardCvv.Text = "***";
+                }
+                else
+                {
+                    ProfileCardNumber.Text = "Нет карты";
+                    ProfileCardExpiry.Text = "—";
+                    ProfileCardCvv.Text = "—";
+                }
+            }
+        }
+
+        private void ShowCardNumberButton_Click(object sender, RoutedEventArgs e)
+        {
+            var button = sender as Button;
+            if (button == null) return;
+
+            if (!_isCardNumberVisible)
+            {
+                // Показываем полный номер карты
+                ProfileCardNumber.Text = _fullCardNumber;
+                button.Content = "🙈 Скрыть";
+                button.Background = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(231, 76, 60));
+                _isCardNumberVisible = true;
+            }
+            else
+            {
+                // Скрываем номер карты
+                var card = CardService.Instance.GetCardByUserId(_authService.CurrentUser.Id);
+                if (card != null)
+                {
+                    ProfileCardNumber.Text = card.MaskedNumber;
+                }
+                button.Content = "👁️ Показать";
+                button.Background = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(52, 152, 219));
+                _isCardNumberVisible = false;
+            }
+        }
+
+        private void ShowCvvButton_Click(object sender, RoutedEventArgs e)
+        {
+            var button = sender as Button;
+            if (button == null) return;
+
+            if (!_isCvvVisible)
+            {
+                // Показываем CVV
+                ProfileCardCvv.Text = _fullCvv;
+                button.Content = "🙈 Скрыть";
+                button.Background = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(231, 76, 60));
+                _isCvvVisible = true;
+
+                // Через 5 секунд автоматически скрыть CVV (безопасность)
+                var timer = new DispatcherTimer();
+                timer.Interval = TimeSpan.FromSeconds(5);
+                timer.Tick += (s, args) =>
+                {
+                    if (_isCvvVisible)
+                    {
+                        ProfileCardCvv.Text = "***";
+                        button.Content = "👁️ Показать";
+                        button.Background = new System.Windows.Media.SolidColorBrush(
+                            System.Windows.Media.Color.FromRgb(230, 126, 34));
+                        _isCvvVisible = false;
+                        timer.Stop();
+                    }
+                };
+                timer.Start();
+            }
+            else
+            {
+                // Скрываем CVV
+                ProfileCardCvv.Text = "***";
+                button.Content = "👁️ Показать";
+                button.Background = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(230, 126, 34));
+                _isCvvVisible = false;
+            }
+        }
+
+        private void RefreshBalance()
+        {
+            var user = _authService.CurrentUser;
+            if (user != null)
+            {
+                var balance = _walletService.GetBalance(user.Id);
+
+                // Верхняя панель
+                BalanceText.Text = $"Баланс: {balance:F2} ₽";
+
+                // Вкладка Профиль
+                ProfileBalance.Text = $"{balance:F2} ₽";
+            }
+        }
+
+        private void LoadHistory()
+        {
+            var user = _authService.CurrentUser;
+            if (user != null)
+            {
+                var history = _transferService.GetUserTransactions(user.Id);
+                HistoryGrid.ItemsSource = history;
+            }
+        }
+
+        private void StartBalanceRefreshTimer()
+        {
+            _balanceTimer = new DispatcherTimer();
+            _balanceTimer.Interval = TimeSpan.FromSeconds(5);
+            _balanceTimer.Tick += (s, e) => RefreshBalance();
+            _balanceTimer.Start();
+        }
+
+        private void TransferButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                string recipient = RecipientBox.Text.Trim();
+                string amountText = AmountBox.Text.Trim();
+
+                if (string.IsNullOrEmpty(recipient))
+                {
+                    MessageBox.Show("Введите номер телефона или карты получателя",
+                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                if (!decimal.TryParse(amountText, out decimal amount) || amount <= 0)
+                {
+                    MessageBox.Show("Введите корректную сумму",
+                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var user = _authService.CurrentUser;
+                if (user == null)
+                {
+                    MessageBox.Show("Пользователь не авторизован. Пожалуйста, войдите снова.",
+                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+
+                    // Перенаправление на окно входа
+                    var loginWindow = new LoginWindow();
+                    loginWindow.Show();
+                    this.Close();
+                    return;
+                }
+
+                // Проверка баланса
+                var currentBalance = _walletService.GetBalance(user.Id);
+                if (currentBalance < amount)
+                {
+                    MessageBox.Show($"Недостаточно средств. Доступно: {currentBalance:F2} ₽",
+                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                // Определение типа перевода
+                string type = TransferTypeBox.SelectedIndex == 0 ? "p2p" : "c2c";
+
+                // Создание транзакции
+                var transaction = _transferService.CreateTransfer(user.Id, recipient, amount, type);
+
+                // Проверка на 2FA
+                if (_authService.NeedTwoFactor(amount))
+                {
+                    _pendingTransaction = transaction;
+                    TwoFactorGrid.Visibility = Visibility.Visible;
+
+                    // Симуляция отправки SMS
+                    NotificationService.Instance.Send2FACode(user.Id, "123456");
+                }
+                else
+                {
+                    ProcessTransfer(transaction);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка: {ex.Message}",
+                    "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ProcessTransfer(Transaction transaction, string twoFactorCode = null)
+        {
+            if (_transferService.ProcessTransfer(transaction, twoFactorCode))
+            {
+                MessageBox.Show($"Перевод на сумму {transaction.Amount:F2} ₽ выполнен успешно!",
+                    "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+
+                RefreshBalance();
+                LoadHistory();
+
+                RecipientBox.Clear();
+                AmountBox.Clear();
+            }
+            else
+            {
+                MessageBox.Show($"Ошибка при выполнении перевода. Статус: {transaction.Status}",
+                    "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void Confirm2FAButton_Click(object sender, RoutedEventArgs e)
+        {
+            string code = TwoFactorCodeBox.Text.Trim();
+
+            if (string.IsNullOrEmpty(code))
+            {
+                MessageBox.Show("Введите код подтверждения",
+                    "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (_pendingTransaction != null)
+            {
+                ProcessTransfer(_pendingTransaction, code);
+                _pendingTransaction = null;
+            }
+
+            TwoFactorGrid.Visibility = Visibility.Collapsed;
+            TwoFactorCodeBox.Clear();
+        }
+
+        private void Cancel2FAButton_Click(object sender, RoutedEventArgs e)
+        {
+            _pendingTransaction = null;
+            TwoFactorGrid.Visibility = Visibility.Collapsed;
+            TwoFactorCodeBox.Clear();
+
+            MessageBox.Show("Перевод отменён",
+                "Отмена", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void RefreshBalanceButton_Click(object sender, RoutedEventArgs e)
+        {
+            RefreshBalance();
+            MessageBox.Show("Баланс обновлён",
+                "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void LogoutButton_Click(object sender, RoutedEventArgs e)
+        {
+            _balanceTimer?.Stop();
+            _authService.Logout();
+
+            var loginWindow = new LoginWindow();
+            loginWindow.Show();
+            this.Close();
+        }
+
+        protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+        {
+            _balanceTimer?.Stop();
+            base.OnClosing(e);
+        }
+        // Добавьте этот метод в класс MainWindow
+
+        private void TopUpButton_Click(object sender, RoutedEventArgs e)
+        {
+            var topUpWindow = new Views.TopUpWindow();
+            topUpWindow.Owner = this;
+            topUpWindow.ShowDialog();
+
+            // Обновляем баланс после закрытия окна пополнения
+            RefreshBalance();
+            LoadHistory();
+        }
+    }
+}
