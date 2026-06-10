@@ -20,3 +20,4 @@
 1. Клонировать репозиторий:
    ```bash
    git clone https://github.com/DENGOGEN/money-transfer-system.git
+<img width="782" height="580" alt="image" src="https://github.com/user-attachments/assets/0a076fbf-891f-41f1-9db6-51b3d8abba05" />
